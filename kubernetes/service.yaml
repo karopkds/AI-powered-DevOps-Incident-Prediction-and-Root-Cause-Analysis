@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata: 
+  name: aiops-app-services
+spec:
+  selector:
+    app: aiops-app
+  
+  ports:
+  - protocol : TCP
+    port : 5000
+    targetPort: 5000
+
+  type: NodePort

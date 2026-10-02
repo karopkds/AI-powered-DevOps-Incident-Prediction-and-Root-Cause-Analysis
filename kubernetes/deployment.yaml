@@ -14,11 +14,11 @@ spec:
       labels:
         app: aiops-app
 
-  spec:
-    containers:
-      - name: aiops-app
-        image: aiops-incident-prediction:v1
-        imagePullPolicy: Never
+    spec:
+      containers:
+        - name: aiops-app
+          image: aiops-incident-prediction:v1
+          imagePullPolicy: Never
 
-        ports:
-          - containerPort: 5000
+          ports:
+            - containerPort: 5000
