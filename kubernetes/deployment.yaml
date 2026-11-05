@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: aiops-app
-          image: aiops-incident-prediction:v1
+          image: aiops-incident-prediction:v3
           imagePullPolicy: Never
 
           ports:

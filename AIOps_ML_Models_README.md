@@ -1,3 +1,176 @@
+# AIOps Intelligence Platform — Project Progress & Restart Runbook
+
+> **Progress snapshot: November 5, 2026.** This section documents the hands-on work verified in the project screenshots. The original ML design and model-selection notes are preserved below.
+
+## Current implementation status
+
+| Area | Status | Evidence / notes |
+|---|---|---|
+| Flask application | Completed | `/`, `/health`, `/metrics`, `/simulate-error` routes created |
+| Prometheus instrumentation | Completed | `prometheus-client` counters and latency histogram exposed |
+| Docker image | Completed | `aiops-incident-prediction:v2` built and loaded into Minikube |
+| Kubernetes deployment | Completed | `aiops-app` rollout successful; new Pod reported Running |
+| Kubernetes Service | Completed | `aiops-app-services`, NodePort `32008`, port `5000` |
+| Prometheus monitoring stack | Completed | kube-prometheus-stack installed in `monitoring` namespace |
+| ServiceMonitor integration | Completed | Prometheus target reported **UP** |
+| Prometheus query validation | Completed | `http_requests_total` returned time series |
+| Grafana dashboards | Completed | HTTP requests/sec and HTTP 5xx error-rate panels plotted |
+| Grafana alert rule | Completed | `AIOps - High HTTP 5xx Error Rate` transitioned to **Firing** during simulation |
+| Slack/contact-point notifications | **Deferred** | Alert fired, but contact point showed `empty` |
+| Telemetry dataset / ML training | Not started | Next session begins with metrics collector |
+| SHAP, RCA, RAG, LLM | Planned | Architecture only; not yet implemented |
+
+## Implementation walkthrough — what we completed
+
+### Step 1 — Flask application and health endpoint
+
+- Created `src/app/app.py` with a Flask web application running on port `5000`.
+- `GET /` responds with an AIOps application message.
+- `GET /health` returns `{"status":"healthy"}` so we can verify the application responds.
+- `GET /simulate-error` deliberately returns HTTP **500** for controlled incident testing. **This is a test endpoint, not a real production failure.**
+- Added `Flask` and `prometheus-client` to `src/app/requirements.txt`.
+
+**Why:** A small instrumented service provides a reproducible target for deployment, monitoring, and simulated incidents.
+
+### Step 2 — Prometheus metrics in Flask
+
+- Created `http_requests_total` as a Counter labeled by HTTP method, endpoint, and status.
+- Created `http_request_duration_seconds` as a Histogram labeled by method and endpoint.
+- Used Flask `before_request` and `after_request` hooks to measure request processing time and update metrics.
+- Excluded `/metrics` from application request measurements to avoid counting Prometheus scrapes as user traffic.
+- Exposed `GET /metrics` using `generate_latest()` and the Prometheus content type.
+- Verified locally that `/health` returned healthy JSON and `/metrics` exposed metric samples.
+
+**Why:** Prometheus requires a scrapeable metrics endpoint; the counter supports traffic and error-rate queries, while the histogram supports latency analysis.
+
+### Step 3 — Docker packaging
+
+- Dockerfile: `src/app/Dockerfile`; base image `python:3.12-slim`.
+- Dockerfile installs requirements, copies `app.py`, exposes `5000`, and runs `python app.py`.
+- Built a new version after adding instrumentation:
+
+```powershell
+docker build -t aiops-incident-prediction:v2 .\src\app
+docker images
+```
+
+**Why:** The image packages the app and dependencies for consistent Kubernetes execution. The host virtual environment is not copied into the image.
+
+### Step 4 — Minikube and Kubernetes deployment
+
+- Used Minikube with the Docker driver on Windows.
+- Loaded the image into Minikube:
+
+```powershell
+minikube image load aiops-incident-prediction:v2
+minikube image ls
+```
+
+- Deployment manifest: `kubernetes/deployment.yaml`, deployment `aiops-app`, image `aiops-incident-prediction:v2`, `imagePullPolicy: Never` for the locally loaded image.
+- Applied the manifest and verified the rollout:
+
+```powershell
+kubectl apply -f .\kubernetes\deployment.yaml
+kubectl rollout status deployment/aiops-app --timeout=120s
+kubectl get pods
+```
+
+- The new Pod was **1/1 Running**. An older Pod from a prior ReplicaSet was also visible with a `Terminating` status; that is normal during a rollout if it subsequently disappears.
+
+**Why:** Kubernetes maintains the desired number of application Pods and replaces them during deployments.
+
+### Step 5 — Kubernetes Service and access
+
+- Manifest: `kubernetes/service.yaml`.
+- Service: `aiops-app-services` in the `default` namespace, type `NodePort`.
+- Selector `app: aiops-app` routes traffic to matching Pods.
+- Named service port `http-metrics`: TCP `5000` -> target `5000`; NodePort `32008`.
+
+```powershell
+kubectl apply -f .\kubernetes\service.yaml
+kubectl get svc aiops-app-services
+minikube service aiops-app-services --url
+```
+
+**Why:** A Service provides a stable network endpoint even if a Pod is replaced. On Windows with the Docker driver, `minikube service --url` may start a tunnel that must remain open.
+
+### Step 6 — Prometheus stack
+
+- Installed the Helm-based kube-prometheus-stack release `monitoring-stack` in namespace `monitoring`.
+- Verified Prometheus, operator, Grafana, node exporter, and related monitoring workloads.
+- Prometheus custom resource: `monitoring-stack-kube-prom-prometheus`; its status showed one available replica.
+
+```powershell
+kubectl get pods -n monitoring
+kubectl get prometheus -n monitoring
+kubectl get svc -n monitoring
+```
+
+**Why:** Prometheus stores time-series telemetry, while the operator configures monitoring resources using Kubernetes custom resources.
+
+### Step 7 — ServiceMonitor discovery
+
+- Manifest: `monitoring/aiops-servicemonitor.yaml`.
+- Created `ServiceMonitor` named `aiops-servicemonitor` in namespace `monitoring` with label `release: monitoring-stack`.
+- Selected Service label `app: aiops-app` in namespace `default`.
+- Configured endpoint port `http-metrics`, path `/metrics`, scrape interval `15s`.
+
+```powershell
+kubectl apply -f .\monitoring\aiops-servicemonitor.yaml
+kubectl get servicemonitor -n monitoring
+```
+
+- In Prometheus **Status > Target health**, target `serviceMonitor/monitoring/aiops-servicemonitor/0` showed **1/1 UP**.
+
+**Why:** A ServiceMonitor tells the Prometheus Operator which Kubernetes Service endpoint to scrape. A target marked UP verifies scraping, not necessarily that every app operation is healthy.
+
+### Step 8 — PromQL validation and Grafana dashboards
+
+- In Prometheus, querying `http_requests_total` returned labeled time series, including HTTP 200 and 404 requests.
+- In Grafana, created an **HTTP Requests per Second** panel:
+
+```promql
+sum(rate(http_requests_total{job="aiops-app-services"}[5m]))
+```
+
+- Created an **HTTP 5xx Error Rate** panel:
+
+```promql
+sum(rate(http_requests_total{job="aiops-app-services",status=~"5.."}[5m]))
+```
+
+- Both charts displayed traffic/error activity after test requests.
+
+**Important:** The 5xx panel measures **errors per second**, not the percentage of requests failing. For an actual 5xx *ratio*, use a numerator/denominator query and handle zero traffic explicitly.
+
+### Step 9 — Grafana alert rule and simulated failure
+
+- Created rule `AIOps - High HTTP 5xx Error Rate` in folder `AIOps-Incident-Monitoring` and evaluation group `aiops-alert-group`.
+- PromQL query used the 5xx errors/second expression above.
+- Threshold: **above 0.1 errors/second**; evaluation every **30 seconds**; pending period **30 seconds**; keep firing **0 seconds**.
+- Triggered requests to `/simulate-error` to generate HTTP 500 responses.
+- Verified rule changed from **Normal** to **Firing** and the metric crossed the threshold.
+- The notification contact point was **empty**. Alert detection works, but **Slack/email delivery is not configured or verified**.
+
+**Why:** This is a complete test of the metrics-to-alert detection path. Delivery of notifications is a separate configuration step.
+
+---
+
+## Next session — planned ML work (not completed yet)
+
+1. Create `src/collect_metrics.py` and query the Prometheus HTTP API for time-series data.
+2. Save timestamped observations in `data/` and validate time windows, missing values, and sampling intervals.
+3. Add features such as requests/sec, 5xx errors/sec, error ratio, latency quantiles, CPU/memory usage, and restart counts **only when their metrics are available**.
+4. Run controlled incident simulations, log experiment IDs and ground-truth incident labels, and avoid leaking related windows between training and testing.
+5. Train an Isolation Forest anomaly-detection baseline; then benchmark supervised incident classifiers as outlined in the original ML plan below.
+6. Later implement SHAP explanations, probable RCA, RAG/LLM guidance, and notification delivery.
+
+**Checkpoint to resume:** Infrastructure monitoring and a Grafana alert are working; the immediate next task is **Prometheus telemetry collection into a dataset**. Slack contact-point setup is intentionally postponed.
+
+---
+
+# Original ML architecture and model plan (preserved)
+
 # Machine Learning Models & Algorithms
 
 ## AIOps Intelligence Platform
