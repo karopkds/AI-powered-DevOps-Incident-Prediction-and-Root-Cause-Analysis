@@ -1,0 +1,2 @@
+experiment_id,fault_type,start_time_utc,end_time_utc,expected_requests,http_500_responses,unexpected_responses,connection_errors
+FAULT-1794614683,HTTP_500_ERROR,2026-11-14T00:04:43.470879+00:00,2026-11-14T00:05:05.194787+00:00,100,100,0,0
