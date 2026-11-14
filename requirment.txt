@@ -1,0 +1,19 @@
+# Flask application and metrics
+Flask
+prometheus-client
+
+# Prometheus API and fault injection
+requests
+
+# Data collection and preprocessing
+pandas
+numpy
+
+# Data visualization
+matplotlib
+
+# Machine learning
+scikit-learn
+
+# Model serialization
+joblib

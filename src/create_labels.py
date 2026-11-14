@@ -6,7 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 TELEMETRY_FILE = (
     PROJECT_ROOT / "data" / "raw"
-    / "telemetry.csv"
+    / "experiment_04_telemetry.csv"
 )
 
 FAULT_FILE = (
@@ -15,7 +15,7 @@ FAULT_FILE = (
 
 OUTPUT_FILE = (
     PROJECT_ROOT / "data" / "processed"
-    / "experiment_02_labeled.csv"
+    / "experiment_04_labeled.csv"
 )
 
 OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)

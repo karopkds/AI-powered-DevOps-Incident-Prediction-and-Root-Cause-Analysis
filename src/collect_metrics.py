@@ -16,7 +16,10 @@ METRICS = {
 }
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_FILE = PROJECT_ROOT / "data" / "raw" / "telemetry.csv"
+OUTPUT_FILE = (
+    PROJECT_ROOT / "data" / "raw"
+    / "experiment_04_telemetry.csv"
+)
 SCRAPE_INTERVAL_SECONDS = 15
 COLLECTION_INTERVAL_SECONDS = 15
 SAMPLES = 45
